@@ -1,0 +1,26 @@
+# Apple Silicon (M4 / M-series) Mac, using Docker Desktop or OrbStack.
+#   docker compose -f docker-compose.mac.yml up --build
+#
+# - Builds an arm64 Ubuntu 22.04 image natively (no emulation).
+# - CPU only: Docker containers on macOS cannot use the Apple GPU (MPS) or CUDA.
+#   Run YOLO on the Mac itself for MPS speed (see installation_guide/README_APPLE_SILICON_M4.md).
+# - Gazebo's window needs XQuartz on the Mac (see the guide). Set VIEW=0 to run without it.
+services:
+  sim:
+    platform: linux/arm64
+    build:
+      context: .
+      args:
+        TORCH: cpu
+    image: drone-inspector-sim-arm64
+    stdin_open: true
+    tty: true
+    environment:
+      - DISPLAY=host.docker.internal:0
+      - YOLO_DEVICE=cpu
+      - YOLO_VIEW=${VIEW:-0}
+      # Ground station on the Mac (listen with: nc -ul 14560)
+      - GROUND_STATION_HOST=host.docker.internal
+      - GROUND_STATION_PORT=14560
+    ports:
+      - "14560:14560/udp"

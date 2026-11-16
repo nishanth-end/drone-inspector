@@ -1,0 +1,24 @@
+# =============================================================================
+# File      : area_patrol.yaml
+# Project   : Quadcopter Autonomous Inspection (UM6P Internship)
+#
+# Description:
+#     Parameters for the predefined-area patrol (area_patrol_mission).
+#     The drone covers a rectangle in a lawnmower pattern, then returns home.
+#     North/East are metres from the take-off point (NED frame). Altitude is positive up.
+# =============================================================================
+
+area_patrol_mission:
+  ros__parameters:
+    north_min_m: -20.0
+    north_max_m: 20.0
+    east_min_m: -20.0
+    east_max_m: 20.0
+    lane_spacing_m: 8.0        # distance between patrol lanes
+    altitude_m: 6.0
+    speed_m_s: 2.0
+    acceptance_m: 1.0          # how close counts as "reached" a waypoint
+    setpoint_rate_hz: 20.0
+    telemetry_rate_hz: 1.0
+    ground_host: "127.0.0.1"   # use host.docker.internal when the sim runs in Docker on macOS
+    ground_port: 14560
