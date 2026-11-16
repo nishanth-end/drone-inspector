@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Drone-Inspector 3D simulation</title>
+<style>
+:root{--bg:#0b1218;--panel:#131c25;--line:#22313f;--fg:#e6edf3;--muted:#8b98a5;--ok:#22c55e;--warn:#f97316;--alert:#ef4444;--accent:#38bdf8;--calc:#facc15}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,sans-serif;padding:14px}
+header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+h1{font-size:18px;margin:0}.tag{font-size:12px;color:var(--muted)}
+.wrap{display:grid;gap:12px;grid-template-columns:minmax(0,1fr) 360px}
+@media (max-width:920px){.wrap{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0}
+#view3d{position:relative;height:560px;border-radius:8px;overflow:hidden;background:#0b1620}
+#view3d canvas{display:block;width:100%;height:100%}
+#mapstat{position:absolute;left:10px;bottom:8px;font-size:12px;color:var(--muted);background:rgba(11,18,24,.7);padding:2px 6px;border-radius:4px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+@media (max-width:920px){.row{grid-template-columns:1fr}}
+canvas.cam{width:100%;height:auto;display:block;border-radius:8px;background:#0b1620}
+h2{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px}
+.req{display:grid;grid-template-columns:18px 1fr;gap:6px 8px;align-items:start;padding:6px 0;border-bottom:1px solid var(--line)}
+.req:last-child{border-bottom:0}
+.dot{width:11px;height:11px;border-radius:50%;margin-top:5px;background:#475569}
+.dot.on{background:var(--ok)} .dot.calc{background:var(--calc);box-shadow:0 0 8px var(--calc)}
+.req b{display:block}.req span{color:var(--muted);font-size:13px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:#0c141c;border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+.stat b{display:block;font-size:16px;font-variant-numeric:tabular-nums}
+.stat span{font-size:11px;color:var(--muted);text-transform:uppercase}
+.plan{font:12px/1.5 ui-monospace,Menlo,monospace;background:#0c141c;border:1px solid var(--line);border-radius:8px;padding:8px;color:#cbd5e1}
+.plan .k{color:var(--calc)}
+ul{list-style:none;padding:0;margin:0;max-height:190px;overflow:auto;font-size:12px}
+li{padding:4px 0;border-bottom:1px solid var(--line)}
+li:last-child{border-bottom:0}
+.mrow{display:flex;justify-content:space-between;gap:8px}
+.st-done{color:var(--ok)} .st-active{color:var(--calc)} .st-pending{color:var(--muted)}
+pre{margin:0;font:11px/1.35 ui-monospace,Menlo,monospace;color:#9fb3c8;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all}
+.pill{font-size:11px;border-radius:4px;padding:1px 6px;color:#fff;margin-right:4px}
+.damage{background:var(--warn)} .emergency{background:var(--alert)}
+.muted{color:var(--muted)} .t{color:var(--muted);margin-right:6px;font-variant-numeric:tabular-nums}
+</style></head><body>
+<header><h1>Drone-Inspector &middot; 3D mission simulation</h1>
+<span class="tag">Simulated flight, camera and detections. Drag to orbit, scroll to zoom.</span>
+<button id="rec" style="margin-left:12px;background:#38bdf8;color:#0b1218;border:0;border-radius:6px;padding:6px 12px;font:600 13px system-ui;cursor:pointer">Record 60 s video</button></header>
+
+<div class="wrap">
+ <div class="panel" style="display:flex;flex-direction:column"><div id="view3d" style="flex:1;height:auto;min-height:560px"><div id="mapstat">loading map...</div></div></div>
+ <div class="panel">
+  <div class="stats">
+   <div class="stat"><span>State</span><b id="st">-</b></div>
+   <div class="stat"><span>Altitude</span><b id="al">-</b></div>
+   <div class="stat"><span>Battery</span><b id="ba">-</b></div>
+  </div>
+  <h2>Problem statement</h2>
+  <div class="req"><div class="dot" id="d1"></div><div><b>Navigate a predefined area</b><span id="r1">-</span></div></div>
+  <div class="req"><div class="dot" id="d2"></div><div><b>Identify damage or emergencies</b><span id="r2">-</span></div></div>
+  <div class="req"><div class="dot" id="d3"></div><div><b>Detect objects with onboard AI</b><span id="r3">-</span></div></div>
+  <div class="req"><div class="dot" id="d4"></div><div><b>Real-time information to ground station</b><span id="r4">-</span></div></div>
+  <h2>Autonomy stack <span style="color:var(--warn);text-transform:none">GPS denied</span></h2>
+  <ul id="algos" style="max-height:none"></ul>
+  <h2>Planner (recalculates every turn)</h2>
+  <div class="plan" id="plan">waiting for first plan...</div>
+  <h2>Missions (flight paths)</h2>
+  <ul id="missions"></ul>
+ </div>
+</div>
+
+<div class="row">
+ <div class="panel">
+  <h2 style="margin-top:0">Sightings and event log</h2>
+  <ul id="det" style="max-height:120px;margin-bottom:8px"><li class="muted">none yet</li></ul>
+  <ul id="log"></ul>
+ </div>
+ <div class="panel">
+  <h2 style="margin-top:0">Onboard camera (simulated AI boxes)</h2>
+  <canvas class="cam" id="cam" width="420" height="420"></canvas>
+ </div>
+</div>
+<div class="row">
+ <div class="panel" style="grid-column:1/-1">
+  <h2 style="margin-top:0">Ground station feed (JSON over UDP link)</h2>
+  <pre id="pk">waiting for packets...</pre>
+ </div>
+</div>
+
+<script src="sim.js"></script>
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js",
+"three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {MeshoptDecoder} from 'three/addons/libs/meshopt_decoder.module.js';
+
+const MAP_SPAN = 70;                       // map is scaled so its longest flat side is 70 m
+const PATH_COLORS = [0x38bdf8, 0xa78bfa, 0xf472b6, 0xfacc15, 0x34d399];
+const COL = {damage: '#f97316', emergency: '#ef4444'};
+const $ = id => document.getElementById(id);
+// Simulation (north, east, altitude) -> three.js (x = east, y = up, z = -north)
+const P = (n, e, alt = 0) => new THREE.Vector3(e, alt, -n);
+
+// ---------- 3D scene ----------
+const host = $('view3d');
+const renderer = new THREE.WebGLRenderer({antialias: true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+host.insertBefore(renderer.domElement, host.firstChild);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1620);
+scene.fog = new THREE.Fog(0x0b1620, 90, 220);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 600);
+camera.position.set(30, 34, 38);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0); controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.49;
+scene.add(new THREE.HemisphereLight(0xc7dcff, 0x203040, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.1); sun.position.set(30, 60, 20); scene.add(sun);
+function resize(){
+  const w = host.clientWidth, h = host.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize); resize();
+new ResizeObserver(resize).observe(host);
+
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(90, 90), new THREE.MeshStandardMaterial({color: 0x17303f, roughness: 1}));
+ground.rotation.x = -Math.PI / 2; scene.add(ground);
+const grid = new THREE.GridHelper(90, 45, 0x2d5068, 0x1c3446); grid.position.y = 0.01; scene.add(grid);
+
+// Terrain map from demo/models/map.glb (fitted to the scene)
+const mapGroup = new THREE.Group(); scene.add(mapGroup);
+const mapLoader = new GLTFLoader(); mapLoader.setMeshoptDecoder(MeshoptDecoder);
+mapLoader.load('/models/map.glb', gltf => {
+  const m = gltf.scene;
+  const box = new THREE.Box3().setFromObject(m);
+  const size = box.getSize(new THREE.Vector3());
+  const c = box.getCenter(new THREE.Vector3());
+  const span = Math.max(size.x, size.z) || 1;
+  const s = MAP_SPAN / span;
+  m.scale.setScalar(s);
+  m.position.set(-c.x * s, -box.min.y * s, -c.z * s);
+  mapGroup.add(m);
+  ground.visible = false; grid.visible = false; structGroup.visible = false;
+  $('mapstat').textContent = `map.glb loaded (${(size.x * s).toFixed(0)} x ${(size.z * s).toFixed(0)} m, scaled to fit)`;
+}, xhr => {
+  if (xhr.total) $('mapstat').textContent = `loading map.glb ${(100 * xhr.loaded / xhr.total).toFixed(0)}%`;
+}, () => { $('mapstat').textContent = 'map not included in this online version, using the built-in ground'; });
+
+// Predefined area outline
+const areaPts = [P(-20, -20, .05), P(20, -20, .05), P(20, 20, .05), P(-20, 20, .05), P(-20, -20, .05)];
+scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(areaPts),
+  new THREE.LineBasicMaterial({color: 0x2b7bb0})));
+
+// Built-in structures (used when no map.glb is present)
+const structGroup = new THREE.Group(); scene.add(structGroup);
+function label(text, color){
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d'); g.fillStyle = 'rgba(11,18,24,.8)'; g.fillRect(0, 0, 256, 64);
+  g.fillStyle = color; g.font = 'bold 30px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 128, 34);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({map: new THREE.CanvasTexture(c), depthTest: false}));
+  sp.scale.set(4.5, 1.1, 1); return sp;
+}
+const steel = new THREE.MeshStandardMaterial({color: 0x4f8fb8, metalness: .4, roughness: .5});
+const pipe = new THREE.Mesh(new THREE.BoxGeometry(.7, .7, 46), steel); pipe.position.set(-2, .35, 0);
+const tank = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 6, 36), new THREE.MeshStandardMaterial({color: 0x64748b, metalness: .5, roughness: .4}));
+tank.position.set(23, 3, -(-4));
+const bld = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 10), new THREE.MeshStandardMaterial({color: 0x475569, roughness: .8}));
+bld.position.set(-18, 2.5, -13);
+structGroup.add(pipe, tank, bld);
+const lp = label('pipeline', '#8fc3e0'); lp.position.copy(P(0, -2, 1.6));
+const lt = label('tank', '#cbd5e1'); lt.position.copy(P(-4, 23, 8.5));
+const lb = label('building', '#cbd5e1'); lb.position.copy(P(13, -18, 6.5));
+structGroup.add(lp, lt, lb);
+
+// Five mission paths (drawn once from the server's list)
+const pathGroup = new THREE.Group(); scene.add(pathGroup);
+const pathLines = [];
+function buildPaths(missions){
+  if (pathLines.length) return;
+  missions.forEach((m, i) => {
+    const pts = [P(0, 0, ALT_LINE)].concat(m.path.map(p => P(p[0], p[1], ALT_LINE)));
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineDashedMaterial({color: PATH_COLORS[i % PATH_COLORS.length], dashSize: .9, gapSize: .5, transparent: true, opacity: .45}));
+    line.computeLineDistances(); pathGroup.add(line); pathLines.push(line);
+    m.path.forEach(p => { const d = new THREE.Mesh(new THREE.SphereGeometry(.16, 10, 8),
+      new THREE.MeshBasicMaterial({color: PATH_COLORS[i % PATH_COLORS.length], transparent: true, opacity: .6}));
+      d.position.copy(P(p[0], p[1], ALT_LINE)); pathGroup.add(d); });
+  });
+}
+const ALT_LINE = 6;
+
+// Trail of the real flight
+const trailLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({color: 0x22c55e}));
+scene.add(trailLine);
+
+// Planner visuals: candidate lines and chosen target
+const candGroup = new THREE.Group(); scene.add(candGroup);
+const chosenRing = new THREE.Mesh(new THREE.RingGeometry(.9, 1.2, 40),
+  new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: .9, side: THREE.DoubleSide}));
+chosenRing.rotation.x = -Math.PI / 2; chosenRing.visible = false; scene.add(chosenRing);
+
+// Ground objects
+const objMeshes = [];
+function buildObjects(objs){
+  if (objMeshes.length) return;
+  objs.forEach(o => {
+    const col = COL[o.cat];
+    const core = new THREE.Mesh(new THREE.SphereGeometry(.42, 18, 14), new THREE.MeshStandardMaterial({color: 0x475569, transparent: true, opacity: .55}));
+    core.position.copy(P(o.n, o.e, .45));
+    const ring = new THREE.Mesh(new THREE.RingGeometry(.9, 1.05, 40), new THREE.MeshBasicMaterial({color: col, transparent: true, opacity: .85, side: THREE.DoubleSide}));
+    ring.rotation.x = -Math.PI / 2; ring.position.copy(P(o.n, o.e, .08));
+    const tag = label(o.label, col); tag.position.copy(P(o.n, o.e, 2.2)); tag.visible = false;
+    scene.add(core, ring, tag);
+    objMeshes.push({core, ring, tag, col});
+  });
+}
+
+// Drone: procedural quadrotor, replaced by drone.glb when it is in demo/models/
+const droneRoot = new THREE.Group(); droneRoot.scale.setScalar(1.8); scene.add(droneRoot);
+const rotors = [];
+function buildQuad(){
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(.6, .22, .6), new THREE.MeshStandardMaterial({color: 0x334155, metalness: .3, roughness: .5})));
+  const armMat = new THREE.MeshStandardMaterial({color: 0x94a3b8, metalness: .2});
+  const rotorMat = new THREE.MeshStandardMaterial({color: 0x22d3ee, transparent: true, opacity: .45});
+  const d = Math.SQRT2 * .75;
+  [[1, 1], [1, -1], [-1, 1], [-1, -1]].forEach(([x, z]) => {
+    const dir = new THREE.Vector3(x, 0, z).normalize();
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(.04, .04, d, 8), armMat);
+    arm.position.copy(dir.clone().multiplyScalar(d / 2));
+    arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    g.add(arm);
+    const rot = new THREE.Group(); rot.position.copy(dir.clone().multiplyScalar(d)); rot.position.y = .12;
+    rot.add(new THREE.Mesh(new THREE.CylinderGeometry(.42, .42, .02, 28), rotorMat));
+    rot.add(new THREE.Mesh(new THREE.BoxGeometry(.7, .02, .07), armMat));
+    g.add(rot); rotors.push(rot);
+  });
+  return g;
+}
+let droneProc = buildQuad(); droneRoot.add(droneProc);
+function haloTex(){
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d'); const grd = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  grd.addColorStop(0, 'rgba(255,255,255,.95)'); grd.addColorStop(.3, 'rgba(56,189,248,.55)'); grd.addColorStop(1, 'rgba(56,189,248,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 256, 256); return new THREE.CanvasTexture(c);
+}
+const halo = new THREE.Sprite(new THREE.SpriteMaterial({map: haloTex(), transparent: true, opacity: .9,
+  blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false}));
+halo.scale.set(5, 5, 1); halo.position.y = .3; droneRoot.add(halo);
+const droneTag = label('DRONE', '#7dd3fc'); droneTag.position.set(0, 2.6, 0); droneRoot.add(droneTag);
+const droneLight = new THREE.PointLight(0x38bdf8, 6, 14); droneLight.position.set(0, 1, 0); droneRoot.add(droneLight);
+new GLTFLoader().load('/models/drone.glb', gltf => {
+  const m = gltf.scene;
+  const box = new THREE.Box3().setFromObject(m);
+  const size = box.getSize(new THREE.Vector3());
+  const s = 2.2 / Math.max(size.x, size.y, size.z, 1e-6);
+  m.scale.setScalar(s);
+  m.position.copy(box.getCenter(new THREE.Vector3()).multiplyScalar(-s));
+  droneRoot.remove(droneProc); droneRoot.add(m);
+}, undefined, () => {});
+
+// Camera footprint on the ground
+const foot = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, .04, 64), new THREE.MeshBasicMaterial({color: 0xfacc15, transparent: true, opacity: .14, depthWrite: false}));
+const footRing = new THREE.Mesh(new THREE.RingGeometry(.97, 1, 96), new THREE.MeshBasicMaterial({color: 0xfacc15, transparent: true, opacity: .7, side: THREE.DoubleSide}));
+footRing.rotation.x = -Math.PI / 2; scene.add(foot, footRing);
+
+// ---------- animation ----------
+let S = null;
+const cur = new THREE.Vector3();
+function frame(){
+  requestAnimationFrame(frame);
+  const now = performance.now() / 1000;
+  if (S){
+    cur.lerp(P(S.n, S.e, S.alt), .18);
+    droneRoot.position.copy(cur);
+    droneRoot.rotation.y = -THREE.MathUtils.degToRad(S.heading);
+    rotors.forEach((r, i) => r.rotation.y += (i % 2 ? -.9 : .9));
+    foot.position.set(cur.x, .03, cur.z); footRing.position.set(cur.x, .05, cur.z);
+    foot.scale.set(S.footprint_r, 1, S.footprint_r); footRing.scale.set(S.footprint_r, S.footprint_r, 1);
+    objMeshes.forEach(o => o.ring.scale.setScalar(1 + .15 * Math.sin(now * 3)));
+    chosenRing.scale.setScalar(1 + .25 * Math.sin(now * 5));
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+frame();
+
+// ---------- panels ----------
+const cam = $('cam'), cg = cam.getContext('2d');
+function drawCam(s){
+  const W = cam.width; cg.fillStyle = '#0b1620'; cg.fillRect(0, 0, W, W);
+  cg.strokeStyle = '#17324a'; cg.lineWidth = 1;
+  for (let i = 0; i <= 8; i++){ cg.beginPath(); cg.moveTo(i*W/8, 0); cg.lineTo(i*W/8, W); cg.stroke();
+    cg.beginPath(); cg.moveTo(0, i*W/8); cg.lineTo(W, i*W/8); cg.stroke(); }
+  cg.strokeStyle = '#facc15'; cg.lineWidth = 3; cg.strokeRect(1, 1, W-2, W-2);
+  cg.fillStyle = '#94a3b8'; cg.font = '12px system-ui';
+  cg.fillText(`alt ${s.alt.toFixed(1)} m   heading ${s.heading.toFixed(0)}°`, 10, W - 10);
+  s.camera.forEach(b => {
+    const bw = .22 * W, x = b.x * W - bw / 2, y = b.y * W - bw / 2, col = COL[b.cat] || '#fff';
+    cg.strokeStyle = col; cg.lineWidth = 3; cg.strokeRect(x, y, bw, bw);
+    cg.fillStyle = col; cg.font = 'bold 13px system-ui';
+    cg.fillText(`${b.label} ${(b.conf * 100).toFixed(0)}%`, x, Math.max(14, y - 5));
+  });
+}
+
+function drawCandidates(s){
+  candGroup.clear();
+  if (!s.plan) { chosenRing.visible = false; return; }
+  const from = P(s.n, s.e, s.alt);
+  s.plan.candidates.forEach((c, i) => {
+    const to = P(c.n, c.e, .25);
+    const g = new THREE.BufferGeometry().setFromPoints([from, to]);
+    candGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({color: 0xfacc15, transparent: true, opacity: i === 0 ? .9 : .35})));
+  });
+  chosenRing.position.copy(P(s.plan.chosen.n, s.plan.chosen.e, .1));
+  chosenRing.visible = s.state === 'FLYING';
+}
+
+function renderMissions(s){
+  const rows = s.missions.map((m, i) => {
+    const idx = i + 1;
+    let st = 'pending', txt = 'pending';
+    if (s.state === 'DONE' || idx < s.mission_index || (idx === s.mission_index && s.state !== 'FLYING' && s.state !== 'TAKEOFF')) { st = 'done'; txt = 'done'; }
+    else if (idx === s.mission_index) { st = 'active'; txt = `active, ${s.visits}/${s.targets_total}`; }
+    return `<li><div class="mrow"><span><span style="color:#${PATH_COLORS[i].toString(16).padStart(6,'0')}">&#9632;</span> ${idx}. ${m.name}</span><span class="st-${st}">${txt}</span></div></li>`;
+  });
+  $('missions').innerHTML = rows.join('');
+  pathLines.forEach((l, i) => { l.material.opacity = (i + 1 === s.mission_index) ? .95 : .35; });
+}
+
+async function poll(){
+  try{
+    const s = window.SIM.snapshot();
+    S = s;
+    buildPaths(s.missions); buildObjects(s.objects);
+    s.objects.forEach((o, i) => {
+      const m = objMeshes[i]; if (!m) return;
+      m.tag.visible = o.found;
+      m.core.material.color.set(o.found ? m.col : 0x475569);
+      m.core.material.opacity = o.found ? .95 : .55;
+    });
+    trailLine.geometry.dispose();
+    trailLine.geometry = new THREE.BufferGeometry().setFromPoints(s.trail.map(p => P(p[0], p[1], s.alt)));
+    drawCandidates(s);
+
+    $('st').textContent = s.state;
+    $('al').textContent = s.alt.toFixed(1) + ' m';
+    $('ba').textContent = Math.round(s.battery) + '%';
+
+    const dmg = s.objects.filter(o => o.cat === 'damage'), emg = s.objects.filter(o => o.cat === 'emergency');
+    const dFound = dmg.filter(o => o.found).length, eFound = emg.filter(o => o.found).length;
+    $('r1').textContent = s.state === 'DONE' ? `All ${s.mission_total} missions complete`
+      : `Mission ${s.mission_index}/${s.mission_total}: ${s.mission_name}, target ${s.visits}/${s.targets_total}`;
+    $('d1').className = 'dot ' + (s.state === 'DONE' ? 'on' : (s.mission_index ? 'calc' : ''));
+    $('r2').textContent = `Damage ${dFound}/${dmg.length} found, emergency ${eFound}/${emg.length} found`;
+    $('d2').className = 'dot ' + (eFound + dFound > 0 ? 'on' : '');
+    $('r3').textContent = `${s.camera.length} object(s) in camera view now`;
+    $('d3').className = 'dot ' + (s.camera.length ? 'on' : '');
+    $('r4').textContent = `${s.packets_sent} packets sent, last plan computed in ${s.plan ? s.plan.compute_ms.toFixed(3) : '-'} ms`;
+    $('d4').className = 'dot ' + (s.packets_sent ? 'on' : '');
+
+    if (s.plan){
+      const p = s.plan;
+      $('plan').innerHTML =
+        `<span class="k">turn ${p.turn}</span> &middot; mission ${p.mission}<br>` +
+        `scored <span class="k">${p.scored}</span> targets in <span class="k">${p.compute_ms.toFixed(3)} ms</span><br>` +
+        `next: <span class="k">${p.next}</span><br>` +
+        p.candidates.map((c, i) => `${i === 0 ? '&#9654;' : '&nbsp;'} N ${c.n}, E ${c.e}  cost ${c.cost} (turn ${c.turn}&deg;)`).join('<br>');
+    }
+    $('algos').innerHTML = s.algorithms.map(a =>
+      `<li><div class="muted" style="font-size:11px;text-transform:uppercase">${a.layer}</div><b>${a.name}</b><div class="muted">${a.status}</div></li>`).join('');
+    renderMissions(s);
+
+    $('det').innerHTML = s.objects.filter(o => o.found).map(o =>
+      `<li><span class="pill ${o.cat}">${o.cat}</span>${o.label} <span class="muted">${(o.conf * 100).toFixed(0)}% &middot; N ${o.n}, E ${o.e}</span></li>`
+    ).join('') || '<li class="muted">none yet</li>';
+    $('log').innerHTML = s.events.map(ev => `<li><span class="t">${ev.t.toFixed(1)}s</span>${ev.msg}</li>`).join('');
+    $('pk').textContent = s.packets.map(p => JSON.stringify(p)).join('\n') || 'waiting for packets...';
+    drawCam(s);
+  }catch(e){ /* server not reachable yet */ }
+}
+$('rec').onclick = async () => {
+  const btn = $('rec');
+  let stream;
+  try { stream = await navigator.mediaDevices.getDisplayMedia({video: {frameRate: 30}, audio: false, preferCurrentTab: true}); }
+  catch (e) { stream = renderer.domElement.captureStream(30); }
+  const rec = new MediaRecorder(stream, {mimeType: 'video/webm'});
+  const chunks = [];
+  rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  rec.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(chunks, {type: 'video/webm'}));
+    a.download = 'drone-inspector-demo.webm'; a.click();
+    btn.textContent = 'Record 60 s video'; btn.disabled = false;
+  };
+  rec.start(); btn.textContent = 'Recording... (60 s)'; btn.disabled = true;
+  setTimeout(() => rec.stop(), 60000);
+};
+setInterval(poll, 150); poll();
+</script>
+</body></html>
