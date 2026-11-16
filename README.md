@@ -415,6 +415,22 @@ Apple Silicon runs an arm64 Ubuntu 22.04 container natively, so there is no emul
 
 For deeper details, see the guides in `installation_guide/` and `docs/`.
 
+## 3D mission simulation (demo)
+
+A browser demo runs the mission in 3D without PX4 or Gazebo, so the flight, planner and detections can be shown on any machine:
+
+```bash
+python3 demo/dashboard.py     # then open http://localhost:4344
+```
+
+Optional models: put `drone.glb` and `map.glb` in `demo/models/` (not stored in git because of their size).
+
+![3D view of the mission over the terrain map](demo/screenshots/overview-3d.png)
+
+The planner scores every remaining target on each turn and logs the choice, and the camera view draws simulated detection boxes:
+
+![Planner, problem-statement status and onboard camera view](demo/screenshots/planner-and-camera.png)
+
 ## Credits
 
 Drone-Inspector builds on these projects:

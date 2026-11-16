@@ -28,3 +28,6 @@ data/bags/
 .idea/
 *.swp
 .DS_Store
+
+# Large demo models (not for git)
+demo/models/*.glb

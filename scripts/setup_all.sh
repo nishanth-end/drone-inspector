@@ -75,7 +75,12 @@ preflight() {
     free_gb=$(df -BG --output=avail "${HOME}" | tail -1 | tr -dc '0-9')
     [ "${free_gb:-0}" -ge 25 ] || warn "Only ${free_gb} GB free in ${HOME}. PX4 + Gazebo + PyTorch need roughly 20-25 GB."
 
-    sudo -v
+    # Ask for the password once, unless sudo already works without one
+    # (Docker build with NOPASSWD, or a cached credential). `sudo -v` alone
+    # still prompts under NOPASSWD, which fails in a non-interactive build.
+    if ! sudo -n true 2>/dev/null; then
+        sudo -v
+    fi
     # keep sudo alive during long builds
     ( while true; do sudo -n true; sleep 50; kill -0 "$$" 2>/dev/null || exit; done ) 2>/dev/null &
 
